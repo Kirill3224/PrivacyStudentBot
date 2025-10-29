@@ -1,4 +1,4 @@
-[200~```markdown
+```markdown
 # Student Privacy Helper Bot 🇺🇦
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
@@ -44,7 +44,7 @@ privacy-student-bot/
 ### Встановлення
 ```bash
 # Клонувати репозиторій
-git clone https://github.com/your-username/privacy-student-bot.git
+git clone https://github.com/Kirill3224/PrivacyStudentBot.git
 cd privacy-student-bot
 
 # Встановити залежності
@@ -111,3 +111,24 @@ python src/bot.py
 *Частина курсу "Правова культура як інструмент дії"*
 ```
 
+**Тепер виконайте ці команди:**
+
+```bash
+# Відкрити файл для редагування
+nano README.md
+
+# Видалити ВЕСЬ існуючий текст (Ctrl+K для видалення рядків)
+# Вставити текст вище (Ctrl+Shift+V або правою кнопкою миші)
+# Зберегти: Ctrl+X → Y → Enter
+
+# Додати змінений файл
+git add README.md
+
+# Завершити merge
+git commit -m "Resolve merge conflict with final README version"
+
+# Запушити
+git push origin main
+```
+
+Це має спрацювати! Тепер у вас чистий, професійний README файл без конфліктів. 🚀
