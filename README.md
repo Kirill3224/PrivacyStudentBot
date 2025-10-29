@@ -1,4 +1,3 @@
-```markdown
 # Student Privacy Helper Bot 🇺🇦
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
@@ -16,7 +15,6 @@
 
 ## 🚀 Швидкий старт
 
-```bash
 # Клонувати репозиторій
 git clone https://github.com/Kirill3224/PrivacyStudentBot.git
 cd PrivacyStudentBot
@@ -26,7 +24,6 @@ pip install -r src/requirements.txt
 
 # Запустити бота
 python src/bot.py
-```
 
 ## ✨ Особливості
 
