@@ -1,7 +1,6 @@
 # -*- coding: utf-8 -*-
 """
 Генерація PDF з Markdown (PDF-only).
-(v3.2 - Взято у товариша)
 Черга спроб:
   A) pdfkit + wkhtmltopdf (рекомендовано; шлях можна задати через env WKHTMLTOPDF_CMD)
   B) xhtml2pdf (pisa) — працює без зовнішніх бінарників (CSS дещо скромніший)

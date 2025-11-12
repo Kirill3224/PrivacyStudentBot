@@ -1,3 +1,10 @@
+# KAI Privacy Kit - "Privacy Sentry" Bot
+#
+# @authors: Кирило Ревякін (Team Lead / Arch)
+#            Олександр Лєбєдєв (Tech Lead)
+# @link:     https://github.com/Kirill3224/KAI-Privacy-Kit
+# @license:  MIT License (see LICENSE file)
+#
 # -*- coding: utf-8 -*-
 """
 Головний файл бота "Privacy Sentry" (v3.1 - Фінальний UX)
@@ -77,7 +84,7 @@ if not BOT_TOKEN:
     DPIA_GENERATE,
 ) = range(13)
 
-# --- Етапи для "Чек-ліста" (19 етапів + 9 'skip' станів = 28) ---
+# --- Етапи для "Чек-ліста" (v3.1.3 - ВИПРАВЛЕНО ValueError) ---
 (
     CHECKLIST_START, # C0
     C1_S1_NOTE, # C1
@@ -98,17 +105,7 @@ if not BOT_TOKEN:
     C3_S3_STATUS, # C16
     C3_S3_NOTE, # C17
     CHECKLIST_GENERATE, # C18
-    # (v2.8) Етапи для "Skip Logic"
-    C1_S2_STATUS_SKIP,
-    C1_S3_STATUS_SKIP,
-    C2_S1_STATUS_SKIP,
-    C2_S2_STATUS_SKIP,
-    C2_S3_STATUS_SKIP,
-    C3_S1_STATUS_SKIP,
-    C3_S2_STATUS_SKIP,
-    C3_S3_STATUS_SKIP,
-    CHECKLIST_GENERATE_SKIP,
-) = range(28) 
+) = range(19) # (v3.1.3) Тепер 19 станів і range(19). Все вірно.
 
 
 # === 1. Головне Меню та Допоміжні Функції ===
@@ -822,12 +819,14 @@ async def checklist_c1_s1_note(update: Update, context: ContextTypes.DEFAULT_TYP
     template_data = get_checklist_template_data(context.user_data['cl'])
     text = templates.CHECKLIST_C1_S1_NOTE.format(**template_data)
     await edit_main_message(context, text, get_skip_note_keyboard())
+    # (v3.1.3) Повертаємо ПРАВИЛЬНИЙ стан, який очікує нотатку/skip
     return C1_S2_STATUS 
 
 async def _ask_c1_s2_status(context: ContextTypes.DEFAULT_TYPE) -> int:
     template_data = get_checklist_template_data(context.user_data['cl'])
     text = templates.CHECKLIST_C1_S2_STATUS.format(**template_data)
     await edit_main_message(context, text, get_checklist_status_keyboard())
+    # (v3.1.3) Повертаємо ПРАВИЛЬНИЙ стан, який очікує yes/no
     return C1_S2_NOTE
 
 async def checklist_c1_s2_status_from_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -839,6 +838,7 @@ async def checklist_c1_s2_status_from_skip(update: Update, context: ContextTypes
     query = update.callback_query
     await query.answer()
     context.user_data['cl']['c1_s1_note'] = "*Пропущено*"
+    # (v3.1.3) Викликаємо ту саму функцію
     return await _ask_c1_s2_status(context)
 
 async def checklist_c1_s2_note(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -848,12 +848,14 @@ async def checklist_c1_s2_note(update: Update, context: ContextTypes.DEFAULT_TYP
     template_data = get_checklist_template_data(context.user_data['cl'])
     text = templates.CHECKLIST_C1_S2_NOTE.format(**template_data)
     await edit_main_message(context, text, get_skip_note_keyboard())
+    # (v3.1.3) Повертаємо ПРАВИЛЬНИЙ стан
     return C1_S3_STATUS
 
 async def _ask_c1_s3_status(context: ContextTypes.DEFAULT_TYPE) -> int:
     template_data = get_checklist_template_data(context.user_data['cl'])
     text = templates.CHECKLIST_C1_S3_STATUS.format(**template_data)
     await edit_main_message(context, text, get_checklist_status_keyboard())
+    # (v3.1.3) Повертаємо ПРАВИЛЬНИЙ стан
     return C1_S3_NOTE
 
 async def checklist_c1_s3_status_from_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -874,6 +876,7 @@ async def checklist_c1_s3_note(update: Update, context: ContextTypes.DEFAULT_TYP
     template_data = get_checklist_template_data(context.user_data['cl'])
     text = templates.CHECKLIST_C1_S3_NOTE.format(**template_data)
     await edit_main_message(context, text, get_skip_note_keyboard())
+    # (v3.1.3) Повертаємо ПРАВИЛЬНИЙ стан
     return C2_S1_STATUS
 
 # --- Категорія 2 (Логіка v2.8) ---
@@ -882,6 +885,7 @@ async def _ask_c2_s1_status(context: ContextTypes.DEFAULT_TYPE) -> int:
     template_data = get_checklist_template_data(context.user_data['cl'])
     text = templates.CHECKLIST_C2_S1_STATUS.format(**template_data)
     await edit_main_message(context, text, get_checklist_status_keyboard())
+    # (v3.1.3) Повертаємо ПРАВИЛЬНИЙ стан
     return C2_S1_NOTE
 
 async def checklist_c2_s1_status_from_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -902,12 +906,14 @@ async def checklist_c2_s1_note(update: Update, context: ContextTypes.DEFAULT_TYP
     template_data = get_checklist_template_data(context.user_data['cl'])
     text = templates.CHECKLIST_C2_S1_NOTE.format(**template_data)
     await edit_main_message(context, text, get_skip_note_keyboard())
+    # (v3.1.3) Повертаємо ПРАВИЛЬНИЙ стан
     return C2_S2_STATUS
 
 async def _ask_c2_s2_status(context: ContextTypes.DEFAULT_TYPE) -> int:
     template_data = get_checklist_template_data(context.user_data['cl'])
     text = templates.CHECKLIST_C2_S2_STATUS.format(**template_data)
     await edit_main_message(context, text, get_checklist_status_keyboard())
+    # (v3.1.3) Повертаємо ПРАВИЛЬНИЙ стан
     return C2_S2_NOTE
 
 async def checklist_c2_s2_status_from_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -928,12 +934,14 @@ async def checklist_c2_s2_note(update: Update, context: ContextTypes.DEFAULT_TYP
     template_data = get_checklist_template_data(context.user_data['cl'])
     text = templates.CHECKLIST_C2_S2_NOTE.format(**template_data)
     await edit_main_message(context, text, get_skip_note_keyboard())
+    # (v3.1.3) Повертаємо ПРАВИЛЬНИЙ стан
     return C2_S3_STATUS
 
 async def _ask_c2_s3_status(context: ContextTypes.DEFAULT_TYPE) -> int:
     template_data = get_checklist_template_data(context.user_data['cl'])
     text = templates.CHECKLIST_C2_S3_STATUS.format(**template_data)
     await edit_main_message(context, text, get_checklist_status_keyboard())
+    # (v3.1.3) Повертаємо ПРАВИЛЬНИЙ стан
     return C2_S3_NOTE
 
 async def checklist_c2_s3_status_from_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -954,6 +962,7 @@ async def checklist_c2_s3_note(update: Update, context: ContextTypes.DEFAULT_TYP
     template_data = get_checklist_template_data(context.user_data['cl'])
     text = templates.CHECKLIST_C2_S3_NOTE.format(**template_data)
     await edit_main_message(context, text, get_skip_note_keyboard())
+    # (v3.1.3) Повертаємо ПРАВИЛЬНИЙ стан
     return C3_S1_STATUS
 
 # --- Категорія 3 (Логіка v2.8) ---
@@ -962,6 +971,7 @@ async def _ask_c3_s1_status(context: ContextTypes.DEFAULT_TYPE) -> int:
     template_data = get_checklist_template_data(context.user_data['cl'])
     text = templates.CHECKLIST_C3_S1_STATUS.format(**template_data)
     await edit_main_message(context, text, get_checklist_status_keyboard())
+    # (v3.1.3) Повертаємо ПРАВИЛЬНИЙ стан
     return C3_S1_NOTE
 
 async def checklist_c3_s1_status_from_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -982,12 +992,14 @@ async def checklist_c3_s1_note(update: Update, context: ContextTypes.DEFAULT_TYP
     template_data = get_checklist_template_data(context.user_data['cl'])
     text = templates.CHECKLIST_C3_S1_NOTE.format(**template_data)
     await edit_main_message(context, text, get_skip_note_keyboard())
+    # (v3.1.3) Повертаємо ПРАВИЛЬНИЙ стан
     return C3_S2_STATUS
 
 async def _ask_c3_s2_status(context: ContextTypes.DEFAULT_TYPE) -> int:
     template_data = get_checklist_template_data(context.user_data['cl'])
     text = templates.CHECKLIST_C3_S2_STATUS.format(**template_data)
     await edit_main_message(context, text, get_checklist_status_keyboard())
+    # (v3.1.3) Повертаємо ПРАВИЛЬНИЙ стан
     return C3_S2_NOTE
 
 async def checklist_c3_s2_status_from_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -1008,12 +1020,14 @@ async def checklist_c3_s2_note(update: Update, context: ContextTypes.DEFAULT_TYP
     template_data = get_checklist_template_data(context.user_data['cl'])
     text = templates.CHECKLIST_C3_S2_NOTE.format(**template_data)
     await edit_main_message(context, text, get_skip_note_keyboard())
+    # (v3.1.3) Повертаємо ПРАВИЛЬНИЙ стан
     return C3_S3_STATUS
 
 async def _ask_c3_s3_status(context: ContextTypes.DEFAULT_TYPE) -> int:
     template_data = get_checklist_template_data(context.user_data['cl'])
     text = templates.CHECKLIST_C3_S3_STATUS.format(**template_data)
     await edit_main_message(context, text, get_checklist_status_keyboard())
+    # (v3.1.3) Повертаємо ПРАВИЛЬНИЙ стан
     return C3_S3_NOTE
 
 async def checklist_c3_s3_status_from_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -1034,6 +1048,7 @@ async def checklist_c3_s3_note(update: Update, context: ContextTypes.DEFAULT_TYP
     template_data = get_checklist_template_data(context.user_data['cl'])
     text = templates.CHECKLIST_C3_S3_NOTE.format(**template_data)
     await edit_main_message(context, text, get_skip_note_keyboard())
+    # (v3.1.3) Повертаємо ПРАВИЛЬНИЙ стан
     return CHECKLIST_GENERATE
 
 # --- Генерація (Логіка v2.8) ---
@@ -1181,15 +1196,6 @@ def main() -> None: # (v3.1.2) Повернено до СИНХРОННОЇ
             DPIA_Q_MINIMIZATION_START: [MessageHandler(filters.TEXT & ~filters.COMMAND, dpia_q_minimization_start)],
             DPIA_Q_MINIMIZATION_REASON: [CallbackQueryHandler(dpia_q_minimization_reason, pattern="^min_(yes|no)$")],
             DPIA_Q_MINIMIZATION_STATUS: [MessageHandler(filters.TEXT & ~filters.COMMAND, dpia_q_minimization_status)],
-            # (v3.1 fix) DPIA_Q_RETENTION_PERIOD - це стан, а не функція. 
-            # Функція dpia_minimization_finished() повертає стан DPIA_Q_RETENTION_MECHANISM, 
-            # але має повертати DPIA_Q_RETENTION_PERIOD. 
-            # Але оскільки dpia_minimization_finished викликає edit_main_message з текстом для DPIA_Q_RETENTION_PERIOD, 
-            # наступний MessageHandler має бути DPIA_Q_RETENTION_MECHANISM. 
-            # Тому:
-            # 1. dpia_minimization_finished -> повертає DPIA_Q_RETENTION_MECHANISM
-            # 2. states[DPIA_Q_RETENTION_MECHANISM] -> викликає dpia_q_retention_mechanism
-            # Це вірно.
             DPIA_Q_RETENTION_MECHANISM: [MessageHandler(filters.TEXT & ~filters.COMMAND, dpia_q_retention_mechanism)],
             DPIA_Q_STORAGE: [MessageHandler(filters.TEXT & ~filters.COMMAND, dpia_q_storage)],
             DPIA_Q_RISK: [MessageHandler(filters.TEXT & ~filters.COMMAND, dpia_q_risk)],
@@ -1202,40 +1208,59 @@ def main() -> None: # (v3.1.2) Повернено до СИНХРОННОЇ
     checklist_conv_handler = ConversationHandler(
         entry_points=[CallbackQueryHandler(start_checklist, pattern="^start_checklist$")],
         states={
+            # (v3.1.3) Повністю перероблений state machine
             # Cat 1
             C1_S1_NOTE: [CallbackQueryHandler(checklist_c1_s1_note, pattern="^cl_(yes|no)$")],
-            C1_S2_STATUS: [MessageHandler(filters.TEXT & ~filters.COMMAND, checklist_c1_s2_status_from_text)],
-            C1_S2_STATUS_SKIP: [CallbackQueryHandler(checklist_c1_s2_status_from_skip, pattern="^cl_skip_note$")],
+            C1_S2_STATUS: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, checklist_c1_s2_status_from_text),
+                CallbackQueryHandler(checklist_c1_s2_status_from_skip, pattern="^cl_skip_note$")
+            ],
             C1_S2_NOTE: [CallbackQueryHandler(checklist_c1_s2_note, pattern="^cl_(yes|no)$")],
-            C1_S3_STATUS: [MessageHandler(filters.TEXT & ~filters.COMMAND, checklist_c1_s3_status_from_text)],
-            C1_S3_STATUS_SKIP: [CallbackQueryHandler(checklist_c1_s3_status_from_skip, pattern="^cl_skip_note$")],
+            C1_S3_STATUS: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, checklist_c1_s3_status_from_text),
+                CallbackQueryHandler(checklist_c1_s3_status_from_skip, pattern="^cl_skip_note$")
+            ],
             C1_S3_NOTE: [CallbackQueryHandler(checklist_c1_s3_note, pattern="^cl_(yes|no)$")],
             
             # Cat 2
-            C2_S1_STATUS: [MessageHandler(filters.TEXT & ~filters.COMMAND, checklist_c2_s1_status_from_text)],
-            C2_S1_STATUS_SKIP: [CallbackQueryHandler(checklist_c2_s1_status_from_skip, pattern="^cl_skip_note$")],
+            C2_S1_STATUS: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, checklist_c2_s1_status_from_text),
+                CallbackQueryHandler(checklist_c2_s1_status_from_skip, pattern="^cl_skip_note$")
+            ],
             C2_S1_NOTE: [CallbackQueryHandler(checklist_c2_s1_note, pattern="^cl_(yes|no)$")],
-            C2_S2_STATUS: [MessageHandler(filters.TEXT & ~filters.COMMAND, checklist_c2_s2_status_from_text)],
-            C2_S2_STATUS_SKIP: [CallbackQueryHandler(checklist_c2_s2_status_from_skip, pattern="^cl_skip_note$")],
+            C2_S2_STATUS: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, checklist_c2_s2_status_from_text),
+                CallbackQueryHandler(checklist_c2_s2_status_from_skip, pattern="^cl_skip_note$")
+            ],
             C2_S2_NOTE: [CallbackQueryHandler(checklist_c2_s2_note, pattern="^cl_(yes|no)$")],
-            C2_S3_STATUS: [MessageHandler(filters.TEXT & ~filters.COMMAND, checklist_c2_s3_status_from_text)],
-            C2_S3_STATUS_SKIP: [CallbackQueryHandler(checklist_c2_s3_status_from_skip, pattern="^cl_skip_note$")],
+            C2_S3_STATUS: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, checklist_c2_s3_status_from_text),
+                CallbackQueryHandler(checklist_c2_s3_status_from_skip, pattern="^cl_skip_note$")
+            ],
             C2_S3_NOTE: [CallbackQueryHandler(checklist_c2_s3_note, pattern="^cl_(yes|no)$")],
             
             # Cat 3
-            C3_S1_STATUS: [MessageHandler(filters.TEXT & ~filters.COMMAND, checklist_c3_s1_status_from_text)],
-            C3_S1_STATUS_SKIP: [CallbackQueryHandler(checklist_c3_s1_status_from_skip, pattern="^cl_skip_note$")],
+            C3_S1_STATUS: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, checklist_c3_s1_status_from_text),
+                CallbackQueryHandler(checklist_c3_s1_status_from_skip, pattern="^cl_skip_note$")
+            ],
             C3_S1_NOTE: [CallbackQueryHandler(checklist_c3_s1_note, pattern="^cl_(yes|no)$")],
-            C3_S2_STATUS: [MessageHandler(filters.TEXT & ~filters.COMMAND, checklist_c3_s2_status_from_text)],
-            C3_S2_STATUS_SKIP: [CallbackQueryHandler(checklist_c3_s2_status_from_skip, pattern="^cl_skip_note$")],
+            C3_S2_STATUS: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, checklist_c3_s2_status_from_text),
+                CallbackQueryHandler(checklist_c3_s2_status_from_skip, pattern="^cl_skip_note$")
+            ],
             C3_S2_NOTE: [CallbackQueryHandler(checklist_c3_s2_note, pattern="^cl_(yes|no)$")],
-            C3_S3_STATUS: [MessageHandler(filters.TEXT & ~filters.COMMAND, checklist_c3_s3_status_from_text)],
-            C3_S3_STATUS_SKIP: [CallbackQueryHandler(checklist_c3_s3_status_from_skip, pattern="^cl_skip_note$")],
+            C3_S3_STATUS: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, checklist_c3_s3_status_from_text),
+                CallbackQueryHandler(checklist_c3_s3_status_from_skip, pattern="^cl_skip_note$")
+            ],
             C3_S3_NOTE: [CallbackQueryHandler(checklist_c3_s3_note, pattern="^cl_(yes|no)$")],
 
             # Generate
-            CHECKLIST_GENERATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, checklist_generate_from_text)],
-            CHECKLIST_GENERATE_SKIP: [CallbackQueryHandler(checklist_generate_from_skip, pattern="^cl_skip_note$")],
+            CHECKLIST_GENERATE: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, checklist_generate_from_text),
+                CallbackQueryHandler(checklist_generate_from_skip, pattern="^cl_skip_note$")
+            ],
         },
         fallbacks=[CommandHandler("cancel", cancel)],
     )
