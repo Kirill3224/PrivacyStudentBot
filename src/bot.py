@@ -7,21 +7,27 @@
 #
 # -*- coding: utf-8 -*-
 """
-Головний файл бота "Privacy Sentry" (v3.1 - Фінальний UX)
+Головний файл бота "Privacy Sentry" (v3.8 - Фікс Чек-ліста)
 
 Що нового:
-- Уніфікований "Безшовний" UX: "Політика" та "DPIA" тепер
-  також редагують одне повідомлення, як і "Чек-ліст".
-- Нове Головне Меню: Додано кнопки GitHub, Допомога, Політика.
-- Покращена логіка /cancel та повернення в меню.
-- (v3.1) Новий потік після генерації PDF (PDF -> Повідомлення з кнопкою -> Меню).
-- (v3.1) Видалені всі номери версій ("v2.9") з тексту для користувача.
+- (v3.8) КРИТИЧНИЙ ФІКС (KeyError):
+  - `checklist_conv_handler` тепер має НОВИЙ
+    перший стан: `CHECKLIST_Q_PROJECT_NAME`.
+  - Бот тепер питає "Назву Проєкту" перед початком
+    Чек-ліста (як це роблять Політика та DPIA).
+  - `checklist_generate` тепер коректно
+    отримує `project_name`.
+- (v3.8) ФІКС UX (Нумерація):
+  - Повністю переписано шаблони Чек-ліста
+    в `templates.py` (v3.8).
+  - Прибрано "згортання" категорій (старий баг).
+  - Змінено нумерацію на "Категорія X (Питання Y/9)".
 """
 
 import logging
 import os
 import html
-# (v3.1.2) ВИДАЛЕНО import asyncio
+import asyncio # (v3.6) Потрібно для job_queue
 from datetime import date
 from dotenv import load_dotenv
 from telegram import Update, ReplyKeyboardRemove, InlineKeyboardButton, InlineKeyboardMarkup
@@ -46,6 +52,8 @@ from pdf_utils import create_pdf_from_markdown, clear_temp_file
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
 )
+# (v3.6) Встановлюємо рівень логування для 'JobQueue' вище, щоб не спамив
+logging.getLogger("telegram.ext.JobQueue").setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
 
 # --- Завантаження конфігурації ---
@@ -56,56 +64,58 @@ if not BOT_TOKEN:
     exit()
 
 # === Етапи для Conversation Handlers ===
+# (v3.2) Всі стани перенумеровані для ЄДИНОГО обробника
+# 10-19: Політика
+# 20-39: DPIA
+# 40-59: Чек-ліст
 
 # --- Етапи для "Політики" (Безшовний UX) ---
 (
-    POLICY_START, # Не використовується, але для повноти
-    POLICY_Q_CONTACT,
-    POLICY_Q_DATA_COLLECTED,
-    POLICY_Q_DATA_STORAGE,
-    POLICY_Q_DELETE_MECHANISM,
-    POLICY_GENERATE,
-) = range(6)
+    POLICY_Q_CONTACT, # 10
+    POLICY_Q_DATA_COLLECTED, # 11
+    POLICY_Q_DATA_STORAGE, # 12
+    POLICY_Q_DELETE_MECHANISM, # 13
+    POLICY_GENERATE, # 14
+) = range(10, 15) # 5 станів
 
 # --- Етапи для "DPIA" (Безшовний UX) ---
 (
-    DPIA_START, # Не використовується
-    DPIA_Q_TEAM,
-    DPIA_Q_GOAL,
-    DPIA_Q_DATA_LIST,
-    DPIA_Q_MINIMIZATION_START,
-    DPIA_Q_MINIMIZATION_STATUS,
-    DPIA_Q_MINIMIZATION_REASON,
-    DPIA_Q_RETENTION_PERIOD,
-    DPIA_Q_RETENTION_MECHANISM,
-    DPIA_Q_STORAGE,
-    DPIA_Q_RISK,
-    DPIA_Q_MITIGATION,
-    DPIA_GENERATE,
-) = range(13)
+    DPIA_Q_TEAM, # 20
+    DPIA_Q_GOAL, # 21
+    DPIA_Q_DATA_LIST, # 22
+    DPIA_Q_MINIMIZATION_START, # 23
+    DPIA_Q_MINIMIZATION_STATUS, # 24
+    DPIA_Q_MINIMIZATION_REASON, # 25
+    DPIA_Q_RETENTION_PERIOD, # 26
+    DPIA_Q_RETENTION_MECHANISM, # 27
+    DPIA_Q_STORAGE, # 28
+    DPIA_Q_RISK, # 29
+    DPIA_Q_MITIGATION, # 30
+    DPIA_GENERATE, # 31
+) = range(20, 32) # 12 станів
 
-# --- Етапи для "Чек-ліста" (v3.1.3 - ВИПРАВЛЕНО ValueError) ---
+# --- Етапи для "Чек-ліста" (v3.8 - Додано Q_PROJECT_NAME) ---
 (
-    CHECKLIST_START, # C0
-    C1_S1_NOTE, # C1
-    C1_S2_STATUS, # C2
-    C1_S2_NOTE, # C3
-    C1_S3_STATUS, # C4
-    C1_S3_NOTE, # C5
-    C2_S1_STATUS, # C6
-    C2_S1_NOTE, # C7
-    C2_S2_STATUS, # C8
-    C2_S2_NOTE, # C9
-    C2_S3_STATUS, # C10
-    C2_S3_NOTE, # C11
-    C3_S1_STATUS, # C12
-    C3_S1_NOTE, # C13
-    C3_S2_STATUS, # C14
-    C3_S2_NOTE, # C15
-    C3_S3_STATUS, # C16
-    C3_S3_NOTE, # C17
-    CHECKLIST_GENERATE, # C18
-) = range(19) # (v3.1.3) Тепер 19 станів і range(19). Все вірно.
+    CHECKLIST_Q_PROJECT_NAME, # 40 (НОВИЙ)
+    C1_S1_NOTE, # 41
+    C1_S2_STATUS, # 42
+    C1_S2_NOTE, # 43
+    C1_S3_STATUS, # 44
+    C1_S3_NOTE, # 45
+    C2_S1_STATUS, # 46
+    C2_S1_NOTE, # 47
+    C2_S2_STATUS, # 48
+    C2_S2_NOTE, # 49
+    C2_S3_STATUS, # 50
+    C2_S3_NOTE, # 51
+    C3_S1_STATUS, # 52
+    C3_S1_NOTE, # 53
+    C3_S2_STATUS, # 54
+    C3_S2_NOTE, # 55
+    C3_S3_STATUS, # 56
+    C3_S3_NOTE, # 57
+    CHECKLIST_GENERATE, # 58
+) = range(40, 59) # 19 станів (було 18)
 
 
 # === 1. Головне Меню та Допоміжні Функції ===
@@ -130,6 +140,16 @@ def get_post_action_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([[
         InlineKeyboardButton("⬅️ Повернутись до головного меню", callback_data="start_menu_post_generation")
     ]])
+
+# (НОВЕ v3.3) Клавіатура для "Етичного Нагадування"
+def get_policy_upsell_keyboard() -> InlineKeyboardMarkup:
+    """Повертає клавіатуру "Нагадування" (Чек-ліст + Меню)."""
+    keyboard = [
+        [InlineKeyboardButton("✅ Пройти Чек-ліст (Крок 2)", callback_data="start_checklist_upsell")], # (v3.4) Змінено Крок 3 на 2
+        [InlineKeyboardButton("⬅️ Повернутись до головного меню", callback_data="start_menu_post_generation")]
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """(ОНОВЛЕНО v3.1) Надсилає головне меню (Inline)."""
@@ -163,7 +183,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         # Це команда /start
         await update.message.reply_text(text, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
             
-    return ConversationHandler.END 
+    # (v3.2) Оскільки /start тепер поза ConversationHandler, він не повертає стан
+    # return ConversationHandler.END 
+    return ConversationHandler.END # (v3.2) Повертаємо END на випадок, якщо це викликано з /cancel
 
 async def show_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """(v3.3) Показує /help (БЕЗ кнопки 'Повернутись')"""
@@ -178,13 +200,13 @@ async def show_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     )
 
 async def show_privacy(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """(v3.3) Показує /privacy (БЕЗ кнопки 'Повернутись')"""
+    """(v3.7) Оновлено ParseMode.HTML"""
     if not update.message:
         return
     await update.message.reply_text(
         templates.BOT_PRIVACY_POLICY, 
-        parse_mode=ParseMode.MARKDOWN
-        # (v3.3) ВИДАЛЕНО 'reply_markup'
+        parse_mode=ParseMode.HTML, # (v3.7) ЗМІНЕНО
+        disable_web_page_preview=True # (v3.7) ДОДАНО
     )
 
 async def show_help_inline(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -206,7 +228,7 @@ async def show_help_inline(update: Update, context: ContextTypes.DEFAULT_TYPE) -
              logger.warning(f"show_help_inline: {e}")
 
 async def show_privacy_inline(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """(v3.0) Показує /privacy як редагування повідомлення."""
+    """(v3.7) Оновлено ParseMode.HTML"""
     query = update.callback_query
     await query.answer()
     keyboard = [[InlineKeyboardButton("⬅️ Назад в меню", callback_data="start_menu")]]
@@ -215,14 +237,35 @@ async def show_privacy_inline(update: Update, context: ContextTypes.DEFAULT_TYPE
         await query.edit_message_text(
             templates.BOT_PRIVACY_POLICY, 
             reply_markup=InlineKeyboardMarkup(keyboard), 
-            parse_mode=ParseMode.MARKDOWN
+            parse_mode=ParseMode.HTML, # (v3.7) ЗМІНЕНО
+            disable_web_page_preview=True # (v3.7) ДОДАНО
         )
     except BadRequest as e:
         if "Message is not modified" not in str(e):
              logger.warning(f"show_privacy_inline: {e}")
 
+# (НОВЕ v3.4) Клас-обгортка для 'start'
+class _FakeUpdate:
+    """(v3.4) 'Фальшивий' Update, щоб викликати start() з cancel() або з помилок."""
+    def __init__(self, chat_id, bot):
+        self.callback_query = None
+        self.message = self._Message(chat_id, bot)
+    
+    class _Message:
+        def __init__(self, chat_id, bot):
+            self.chat = self._Chat(chat_id)
+            self._bot = bot
+        
+        class _Chat:
+            def __init__(self, chat_id):
+                self.id = chat_id
+        
+        # start() викликає reply_text
+        async def reply_text(self, text, reply_markup, parse_mode):
+            await self._bot.send_message(chat_id=self.chat.id, text=text, reply_markup=reply_markup, parse_mode=parse_mode)
+
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """(ОНОВЛЕНО v3.1) Скасовує поточну операцію, очищує дані та повертає в меню."""
+    """(ОНОВЛЕНО v3.4) Скасовує поточну операцію, очищує дані та повертає в меню."""
     clear_user_data(context)
     
     query = update.callback_query
@@ -232,17 +275,99 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     
     if query:
         await query.answer()
+        chat_id = query.message.chat_id
         # (v3.1) Намагаємося видалити "Головне" повідомлення
         await delete_main_message(context, query.message.message_id) 
         # ...і надсилаємо підтвердження
-        await context.bot.send_message(chat_id=query.message.chat_id, text=cancel_text)
+        await context.bot.send_message(chat_id=chat_id, text=cancel_text)
     elif message:
+        chat_id = message.chat_id
         await message.reply_text(cancel_text, reply_markup=ReplyKeyboardRemove())
         
-    # (v3.0) Відразу показуємо головне меню
-    await start(update, context)
+    # (v3.4) Викликаємо 'start' з фальшивим update
+    await start(_FakeUpdate(chat_id, context.bot), context)
         
     return ConversationHandler.END
+
+# (v3.6) Допоміжна функція для видалення повідомлення-блокувальника
+async def _delete_blocker_message(context: ContextTypes.DEFAULT_TYPE) -> None:
+    """(v3.6) Видаляє повідомлення 'Ви вже заповнюєте...'."""
+    message_id = context.job.data.get('message_id')
+    chat_id = context.job.data.get('chat_id')
+    if message_id and chat_id:
+        try:
+            await context.bot.delete_message(chat_id=chat_id, message_id=message_id)
+            logger.info(f"Видалено 'повідомлення-блокувальник' {message_id}")
+        except BadRequest as e:
+            logger.warning(f"Не вдалося видалити 'повідомлення-блокувальник': {e}")
+
+
+# (НОВЕ v3.3, ОНОВЛЕНО v3.6) "Блокувальник" перемикання воркфлоу
+async def block_workflow_switch(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """
+    (v3.6) Якщо користувач вже *всередині* розмови, цей обробник
+    блокує натискання кнопок, що починають *іншу* розмову.
+    Повідомлення автоматично зникає через 5 секунд.
+    """
+    query = update.callback_query
+    await query.answer() # Обов'язково відповідаємо на запит
+    
+    # (v3.5) КРИТИЧНИЙ ФІКС:
+    # `context.conversation_data` НЕ ІСНУЄ без Persistence.
+    # Ми маємо читати стан, який ми *вручну* зберегли у `context.user_data`.
+    current_state = context.user_data.get('current_state') 
+    
+    if current_state is None:
+        # Це не мало статися, але якщо стан втрачено, краще скасувати
+        logger.warning(f"block_workflow_switch не зміг знайти 'current_state' для user {context._user_id}. Скасування.")
+        return await cancel(update, context)
+
+    # Надсилаємо тимчасове повідомлення-попередження
+    try:
+        # (v3.4) Додаємо кнопку Cancel для зручності
+        keyboard = [[InlineKeyboardButton("❌ Скасувати поточний аудит", callback_data="cancel_from_block")]]
+        sent_message = await query.message.reply_text(
+            "⚠️ **Ви вже заповнюєте інший документ.**\n\n"
+            "Будь ласка, спочатку завершіть поточний аудит, або натисніть 'Скасувати' нижче.\n"
+            "_(Це повідомлення зникне через 5 секунд)_",
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode=ParseMode.MARKDOWN
+        )
+        
+        # (v3.6) ПЛАНУЄМО ВИДАЛЕННЯ ЦЬОГО ПОВІДОМЛЕННЯ
+        if context.job_queue:
+            context.job_queue.run_once(
+                _delete_blocker_message,
+                5, # (v3.6) Видаляємо через 5 секунд
+                data={'message_id': sent_message.message_id, 'chat_id': sent_message.chat_id},
+                name=f"delete_blocker_{sent_message.message_id}"
+            )
+        else:
+            # (v3.6.1) Додано захист від падіння, якщо JobQueue = None
+            logger.warning("JobQueue не налаштовано. Не можу запланувати видалення 'блокувальника'.")
+
+    except BadRequest as e:
+        logger.warning(f"Не вдалося надіслати block_workflow_switch: {e}")
+    
+    # Повертаємо ПОТОЧНИЙ стан, щоб розмова не перервалася
+    return current_state
+
+# (НОВЕ v3.4) Обробник для кнопки "Скасувати" з 'block_workflow_switch'
+async def cancel_from_block(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """(v3.4) Обробляє кнопку 'Скасувати' з повідомлення 'block_workflow_switch'."""
+    query = update.callback_query
+    await query.answer()
+    
+    # Видаляємо повідомлення "⚠️ Ви вже заповнюєте..."
+    try:
+        await query.message.delete()
+    except BadRequest as e:
+        logger.warning(f"Не вдалося видалити 'block' повідомлення: {e}")
+        
+    # Викликаємо стандартний cancel
+    # (v3.4) Ми передаємо 'query', щоб 'cancel' міг видалити "Головне" повідомлення
+    return await cancel(update, context)
+
 
 def clear_user_data(context: ContextTypes.DEFAULT_TYPE) -> None:
     """Безпечно очищує context.user_data."""
@@ -346,6 +471,8 @@ async def start_policy(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     except BadRequest as e:
         logger.warning(f"start_policy: Помилка: {e}")
 
+    # (v3.5) Зберігаємо поточний стан
+    context.user_data['current_state'] = POLICY_Q_CONTACT
     return POLICY_Q_CONTACT
 
 async def policy_q_contact(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -354,6 +481,9 @@ async def policy_q_contact(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     
     text = templates.POLICY_Q_CONTACT.format(**get_policy_template_data(context.user_data['policy']))
     await edit_main_message(context, text)
+    
+    # (v3.5) Зберігаємо поточний стан
+    context.user_data['current_state'] = POLICY_Q_DATA_COLLECTED
     return POLICY_Q_DATA_COLLECTED
 
 async def policy_q_data_collected(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -362,6 +492,9 @@ async def policy_q_data_collected(update: Update, context: ContextTypes.DEFAULT_
 
     text = templates.POLICY_Q_DATA_COLLECTED.format(**get_policy_template_data(context.user_data['policy']))
     await edit_main_message(context, text)
+    
+    # (v3.5) Зберігаємо поточний стан
+    context.user_data['current_state'] = POLICY_Q_DATA_STORAGE
     return POLICY_Q_DATA_STORAGE
 
 async def policy_q_data_storage(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -370,6 +503,9 @@ async def policy_q_data_storage(update: Update, context: ContextTypes.DEFAULT_TY
     
     text = templates.POLICY_Q_DATA_STORAGE.format(**get_policy_template_data(context.user_data['policy']))
     await edit_main_message(context, text)
+    
+    # (v3.5) Зберігаємо поточний стан
+    context.user_data['current_state'] = POLICY_Q_DELETE_MECHANISM
     return POLICY_Q_DELETE_MECHANISM
 
 async def policy_q_delete_mechanism(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -378,10 +514,13 @@ async def policy_q_delete_mechanism(update: Update, context: ContextTypes.DEFAUL
     
     text = templates.POLICY_Q_DELETE_MECHANISM.format(**get_policy_template_data(context.user_data['policy']))
     await edit_main_message(context, text)
+    
+    # (v3.5) Зберігаємо поточний стан
+    context.user_data['current_state'] = POLICY_GENERATE
     return POLICY_GENERATE
 
 async def policy_generate(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """(ОНОВЛЕНО v3.1) Генерує PDF Політики та показує кнопку "Повернутись"."""
+    """(ОНОВЛЕНО v3.3) Генерує PDF Політики та показує "Етичне Нагадування"."""
     context.user_data['policy']['delete_mechanism'] = update.message.text
     user_id = update.effective_user.id
     logger.info(f"User {user_id}: генерація PDF Політики.")
@@ -414,19 +553,20 @@ async def policy_generate(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         
         await context.bot.send_document(chat_id=update.message.chat_id, document=open(pdf_file_path, 'rb'))
         
-        # (v3.2) Використовуємо helper-функцію
+        # (ОНОВЛЕНО v3.3) Надсилаємо "Етичне Нагадування"
         await context.bot.send_message(
             chat_id=update.message.chat_id,
-            text="Ваша Політика Конфіденційності готова. Я видалив усі ваші відповіді зі своєї пам'яті.",
-            reply_markup=get_post_action_keyboard()
+            text=templates.POST_POLICY_UPSELL, # (v3.3) Новий текст
+            reply_markup=get_policy_upsell_keyboard(), # (v3.3) Нові кнопки
+            parse_mode=ParseMode.MARKDOWN
         )
         clear_temp_file(pdf_file_path)
 
     except Exception as e:
         logger.error(f"PDF generation failed for user {user_id}: {e}", exc_info=True)
         await update.message.reply_text(f"Під час генерації PDF сталася помилка: {e}")
-        # (v3.1) Все одно повертаємо в меню, навіть якщо помилка
-        await start(update, context)
+        # (v3.4) Викликаємо 'start' з фальшивим update
+        await start(_FakeUpdate(update.message.chat.id, context.bot), context)
     
     finally:
         try:
@@ -487,6 +627,9 @@ async def start_dpia(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     
     text = templates.DPIA_Q_PROJECT_NAME.format(**get_dpia_template_data({}))
     await edit_main_message(context, text, new_message=True)
+    
+    # (v3.5) Зберігаємо поточний стан
+    context.user_data['current_state'] = DPIA_Q_TEAM
     return DPIA_Q_TEAM
 
 async def dpia_q_team(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -495,6 +638,9 @@ async def dpia_q_team(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
     
     text = templates.DPIA_Q_TEAM.format(**get_dpia_template_data(context.user_data['dpia']))
     await edit_main_message(context, text)
+    
+    # (v3.5) Зберігаємо поточний стан
+    context.user_data['current_state'] = DPIA_Q_GOAL
     return DPIA_Q_GOAL
 
 async def dpia_q_goal(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -503,6 +649,9 @@ async def dpia_q_goal(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
     
     text = templates.DPIA_Q_GOAL.format(**get_dpia_template_data(context.user_data['dpia']))
     await edit_main_message(context, text)
+    
+    # (v3.5) Зберігаємо поточний стан
+    context.user_data['current_state'] = DPIA_Q_DATA_LIST
     return DPIA_Q_DATA_LIST
 
 async def dpia_q_data_list(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -511,6 +660,9 @@ async def dpia_q_data_list(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     
     text = templates.DPIA_Q_DATA_LIST.format(**get_dpia_template_data(context.user_data['dpia']))
     await edit_main_message(context, text)
+    
+    # (v3.5) Зберігаємо поточний стан
+    context.user_data['current_state'] = DPIA_Q_MINIMIZATION_START
     return DPIA_Q_MINIMIZATION_START
 
 async def dpia_q_minimization_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -521,6 +673,8 @@ async def dpia_q_minimization_start(update: Update, context: ContextTypes.DEFAUL
     if not data_list:
         text = templates.DPIA_Q_DATA_LIST_ERROR.format(**get_dpia_template_data(context.user_data['dpia']))
         await edit_main_message(context, text)
+        # (v3.5) Зберігаємо поточний стан (залишаємось тут)
+        context.user_data['current_state'] = DPIA_Q_MINIMIZATION_START
         return DPIA_Q_MINIMIZATION_START
 
     context.user_data['dpia']['data_list'] = data_list
@@ -556,6 +710,9 @@ async def dpia_ask_minimization_status(context: ContextTypes.DEFAULT_TYPE) -> in
     )
 
     await edit_main_message(context, text, reply_markup)
+    
+    # (v3.5) Зберігаємо поточний стан
+    context.user_data['current_state'] = DPIA_Q_MINIMIZATION_REASON
     return DPIA_Q_MINIMIZATION_REASON
 
 async def dpia_q_minimization_reason(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -578,6 +735,9 @@ async def dpia_q_minimization_reason(update: Update, context: ContextTypes.DEFAU
             item=f"`{html.escape(current_data_item)}`"
         )
         await edit_main_message(context, text)
+        
+        # (v3.5) Зберігаємо поточний стан
+        context.user_data['current_state'] = DPIA_Q_MINIMIZATION_STATUS
         return DPIA_Q_MINIMIZATION_STATUS
         
     elif query.data == "min_no":
@@ -606,6 +766,9 @@ async def dpia_minimization_finished(context: ContextTypes.DEFAULT_TYPE) -> int:
     
     text = templates.DPIA_Q_RETENTION_PERIOD.format(**get_dpia_template_data(context.user_data['dpia']))
     await edit_main_message(context, text)
+    
+    # (v3.5) Зберігаємо поточний стан
+    context.user_data['current_state'] = DPIA_Q_RETENTION_MECHANISM
     return DPIA_Q_RETENTION_MECHANISM
 
 async def dpia_q_retention_mechanism(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -614,6 +777,9 @@ async def dpia_q_retention_mechanism(update: Update, context: ContextTypes.DEFAU
     
     text = templates.DPIA_Q_RETENTION_MECHANISM.format(**get_dpia_template_data(context.user_data['dpia']))
     await edit_main_message(context, text)
+    
+    # (v3.5) Зберігаємо поточний стан
+    context.user_data['current_state'] = DPIA_Q_STORAGE
     return DPIA_Q_STORAGE
 
 async def dpia_q_storage(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -622,6 +788,9 @@ async def dpia_q_storage(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     
     text = templates.DPIA_Q_STORAGE.format(**get_dpia_template_data(context.user_data['dpia']))
     await edit_main_message(context, text)
+    
+    # (v3.5) Зберігаємо поточний стан
+    context.user_data['current_state'] = DPIA_Q_RISK
     return DPIA_Q_RISK
 
 async def dpia_q_risk(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -630,6 +799,9 @@ async def dpia_q_risk(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
     
     text = templates.DPIA_Q_RISK.format(**get_dpia_template_data(context.user_data['dpia']))
     await edit_main_message(context, text)
+    
+    # (v3.5) Зберігаємо поточний стан
+    context.user_data['current_state'] = DPIA_Q_MITIGATION
     return DPIA_Q_MITIGATION
 
 async def dpia_q_mitigation(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -638,6 +810,9 @@ async def dpia_q_mitigation(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     
     text = templates.DPIA_Q_MITIGATION.format(**get_dpia_template_data(context.user_data['dpia']))
     await edit_main_message(context, text)
+    
+    # (v3.5) Зберігаємо поточний стан
+    context.user_data['current_state'] = DPIA_GENERATE
     return DPIA_GENERATE
 
 async def dpia_generate(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -718,8 +893,8 @@ async def dpia_generate(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
     except Exception as e:
         logger.error(f"PDF DPIA generation failed for user {user_id}: {e}", exc_info=True)
         await update.message.reply_text(f"Під час генерації PDF сталася помилка: {e}")
-        # (v3.1) Все одно повертаємо в меню, навіть якщо помилка
-        await start(update, context)
+        # (v3.4) Викликаємо 'start' з фальшивим update
+        await start(_FakeUpdate(update.message.chat.id, context.bot), context)
     
     finally:
         try:
@@ -730,7 +905,7 @@ async def dpia_generate(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
         return ConversationHandler.END
 
 
-# === 4. Логіка "Чек-ліста" (3/3) - v2.8 (Без змін, вона ідеальна) ===
+# === 4. Логіка "Чек-ліста" (3/3) - v3.8 ===
 
 def get_checklist_status_keyboard() -> InlineKeyboardMarkup:
     """Повертає клавіатуру Так/Ні для Чек-ліста."""
@@ -768,34 +943,63 @@ def get_note_text_md(note: str) -> str:
         return "Нотатка: *Пропущено*"
     return f"Нотатка: `{html.escape(note)}`"
 
-def get_checklist_template_data(cl_data: dict) -> dict:
-    """(v2.8) Готує словник для заповнення шаблонів v2.8."""
-    data = {
-        'c1_s1_status': get_status_text_md(cl_data.get('c1_s1_status', '')),
-        'c1_s1_note': get_note_text_md(cl_data.get('c1_s1_note', '')),
-        'c1_s2_status': get_status_text_md(cl_data.get('c1_s2_status', '')),
-        'c1_s2_note': get_note_text_md(cl_data.get('c1_s2_note', '')),
-        'c1_s3_status': get_status_text_md(cl_data.get('c1_s3_status', '')),
-        'c1_s3_note': get_note_text_md(cl_data.get('c1_s3_note', '')),
+# (НОВЕ v3.8) Ця функція будує історію відповідей для Чек-ліста
+def get_checklist_summary_text(cl_data: dict) -> str:
+    """(v3.8) Генерує 'безшовний' підсумок відповідей для Чек-ліста."""
+    
+    # (v3.8) Завжди показуємо назву проєкту
+    summary = f"✅ **Назва Проєкту:** `{html.escape(cl_data.get('project_name', '...'))}`\n\n"
+    
+    items = [
+        ('c1_s1', "1.1. 2FA"),
+        ('c1_s2', "1.2. 'Найменші привілеї'"),
+        ('c1_s3', "1.3. БЕЗ ПУБЛІЧНИХ ПОСИЛАНЬ"),
+        ('c2_s1', "2.1. Публічна Політика"),
+        ('c2_s2', "2.2. Механізм Видалення"),
+        ('c2_s3', "2.3. Контакт для скарг"),
+        ('c3_s1', "3.1. Безпека Токенів"),
+        ('c3_s2', "3.2. Планування Строків"),
+        ('c3_s3', "3.3. Шифрування"),
+    ]
+    
+    last_category = ""
+    for key, name in items:
+        status_key = f"{key}_status"
+        note_key = f"{key}_note"
         
-        'c2_s1_status': get_status_text_md(cl_data.get('c2_s1_status', '')),
-        'c2_s1_note': get_note_text_md(cl_data.get('c2_s1_note', '')),
-        'c2_s2_status': get_status_text_md(cl_data.get('c2_s2_status', '')),
-        'c2_s2_note': get_note_text_md(cl_data.get('c2_s2_note', '')),
-        'c2_s3_status': get_status_text_md(cl_data.get('c2_s3_status', '')),
-        'c2_s3_note': get_note_text_md(cl_data.get('c2_s3_note', '')),
+        status_val = cl_data.get(status_key)
+        note_val = cl_data.get(note_key)
+        
+        if status_val:
+            # (v3.8) Визначаємо категорію (перший символ 'c1', 'c2'...)
+            category = key[1] 
+            if category != last_category:
+                if last_category != "":
+                    summary += "\n" # Додаємо відступ між категоріями
+                summary += f"**Категорія {category} (Контроль Доступу):**\n"
+                last_category = category
 
-        'c3_s1_status': get_status_text_md(cl_data.get('c3_s1_status', '')),
-        'c3_s1_note': get_note_text_md(cl_data.get('c3_s1_note', '')),
-        'c3_s2_status': get_status_text_md(cl_data.get('c3_s2_status', '')),
-        'c3_s2_note': get_note_text_md(cl_data.get('c3_s2_note', '')),
-        'c3_s3_status': get_status_text_md(cl_data.get('c3_s3_status', '')),
-        'c3_s3_note': get_note_text_md(cl_data.get('c3_s3_note', '')),
+            # Додаємо сам пункт
+            summary += f"**{name}:** {get_status_text_md(status_val)}\n"
+            if note_val:
+                summary += f"{get_note_text_md(note_val)}\n"
+                
+    return summary.strip()
+
+
+def get_checklist_template_data(cl_data: dict) -> dict:
+    """(v3.8) Готує словник для заповнення шаблонів v3.8."""
+    # (v3.8) Більшість ключів тепер генеруються в `get_checklist_summary_text`
+    # Нам потрібні лише ключі для *поточного* питання, яке ми ставимо
+    data = {
+        'project_name': html.escape(cl_data.get('project_name', '...')),
+        'summary_text': get_checklist_summary_text(cl_data),
+        'status': "", # Це заповнюється для шаблонів *_NOTE
     }
     return data
 
 async def start_checklist(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """(v2.9) Починає "безшовну" розмову про Чек-ліст (з CallbackQuery)."""
+    """(v3.8) Починає "безшовну" розмову про Чек-ліст (з CallbackQuery)."""
     query = update.callback_query
     await query.answer()
 
@@ -803,30 +1007,79 @@ async def start_checklist(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     logger.info(f"User {query.from_user.id} почав 'Чек-ліст'.")
     context.user_data['cl'] = {} 
     
-    # (v3.0) Редагуємо головне меню, щоб почати
-    text = templates.CHECKLIST_C1_S1_STATUS.format(**get_checklist_template_data({}))
-    await edit_main_message(context, text, get_checklist_status_keyboard(), new_message=True)
+    # (v3.8) Крок 1: Питаємо "Назву Проєкту"
+    text = templates.CHECKLIST_Q_PROJECT_NAME
+    await edit_main_message(context, text, new_message=True)
     
+    # (v3.8) Зберігаємо поточний стан
+    context.user_data['current_state'] = CHECKLIST_Q_PROJECT_NAME
+    return CHECKLIST_Q_PROJECT_NAME
+
+# (НОВЕ v3.4) Обробник для "Етичного Нагадування"
+async def start_checklist_from_upsell(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """(v3.8) Обробляє кнопку 'upsell', видаляє повідомлення і запускає чек-ліст."""
+    query = update.callback_query
+    await query.answer()
+    
+    # Видаляємо повідомлення "Вітаю! Ви завершили 'Крок 1'..."
+    await delete_main_message(context, query.message.message_id) 
+    
+    # Тепер коректно запускаємо воркфлоу чек-ліста
+    clear_user_data(context)
+    logger.info(f"User {query.from_user.id} почав 'Чек-ліст' (з Нагадування).")
+    context.user_data['cl'] = {} 
+    
+    # (v3.8) Крок 1: Питаємо "Назву Проєкту"
+    text = templates.CHECKLIST_Q_PROJECT_NAME
+    # new_message=True, тому що ми видалили попереднє
+    await edit_main_message(context, text, new_message=True)
+    
+    # (v3.8) Зберігаємо поточний стан
+    context.user_data['current_state'] = CHECKLIST_Q_PROJECT_NAME
+    return CHECKLIST_Q_PROJECT_NAME
+
+# (НОВЕ v3.8) Обробник для "Назви Проєкту" в Чек-лісті
+async def checklist_q_project_name(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """(v3.8) Отримує Назву Проєкту і ставить перше питання Чек-ліста."""
+    context.user_data['cl']['project_name'] = update.message.text
+    await delete_user_text_reply(update)
+    
+    # Ставимо перше питання
+    template_data = get_checklist_template_data(context.user_data['cl'])
+    text = templates.CHECKLIST_C1_S1_STATUS.format(**template_data)
+    await edit_main_message(context, text, get_checklist_status_keyboard())
+    
+    # (v3.8) Зберігаємо поточний стан
+    context.user_data['current_state'] = C1_S1_NOTE
     return C1_S1_NOTE
 
-# --- Категорія 1 (Логіка v2.8) ---
+
+# --- Категорія 1 (Логіка v3.8 - Виправлено "Skip" та UX) ---
 
 async def checklist_c1_s1_note(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     query = update.callback_query
     await query.answer()
-    context.user_data['cl']['c1_s1_status'] = "yes" if query.data == "cl_yes" else "no"
+    status_val = "yes" if query.data == "cl_yes" else "no"
+    context.user_data['cl']['c1_s1_status'] = status_val
     
     template_data = get_checklist_template_data(context.user_data['cl'])
+    # (v3.8) Ми маємо передати 'status' окремо, оскільки 'summary_text' ще не містить його
+    template_data['status'] = get_status_text_md(status_val) 
+    
     text = templates.CHECKLIST_C1_S1_NOTE.format(**template_data)
     await edit_main_message(context, text, get_skip_note_keyboard())
-    # (v3.1.3) Повертаємо ПРАВИЛЬНИЙ стан, який очікує нотатку/skip
+    
+    # (v3.6) Зберігаємо поточний стан
+    context.user_data['current_state'] = C1_S2_STATUS
     return C1_S2_STATUS 
 
 async def _ask_c1_s2_status(context: ContextTypes.DEFAULT_TYPE) -> int:
     template_data = get_checklist_template_data(context.user_data['cl'])
     text = templates.CHECKLIST_C1_S2_STATUS.format(**template_data)
     await edit_main_message(context, text, get_checklist_status_keyboard())
-    # (v3.1.3) Повертаємо ПРАВИЛЬНИЙ стан, який очікує yes/no
+
+    # (v3.6) Зберігаємо поточний стан
+    context.user_data['current_state'] = C1_S2_NOTE
     return C1_S2_NOTE
 
 async def checklist_c1_s2_status_from_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -838,24 +1091,31 @@ async def checklist_c1_s2_status_from_skip(update: Update, context: ContextTypes
     query = update.callback_query
     await query.answer()
     context.user_data['cl']['c1_s1_note'] = "*Пропущено*"
-    # (v3.1.3) Викликаємо ту саму функцію
     return await _ask_c1_s2_status(context)
 
 async def checklist_c1_s2_note(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     query = update.callback_query
     await query.answer()
-    context.user_data['cl']['c1_s2_status'] = "yes" if query.data == "cl_yes" else "no"
+    status_val = "yes" if query.data == "cl_yes" else "no"
+    context.user_data['cl']['c1_s2_status'] = status_val
+    
     template_data = get_checklist_template_data(context.user_data['cl'])
+    template_data['status'] = get_status_text_md(status_val)
+
     text = templates.CHECKLIST_C1_S2_NOTE.format(**template_data)
     await edit_main_message(context, text, get_skip_note_keyboard())
-    # (v3.1.3) Повертаємо ПРАВИЛЬНИЙ стан
+
+    # (v3.6) Зберігаємо поточний стан
+    context.user_data['current_state'] = C1_S3_STATUS
     return C1_S3_STATUS
 
 async def _ask_c1_s3_status(context: ContextTypes.DEFAULT_TYPE) -> int:
     template_data = get_checklist_template_data(context.user_data['cl'])
     text = templates.CHECKLIST_C1_S3_STATUS.format(**template_data)
     await edit_main_message(context, text, get_checklist_status_keyboard())
-    # (v3.1.3) Повертаємо ПРАВИЛЬНИЙ стан
+
+    # (v3.6) Зберігаємо поточний стан
+    context.user_data['current_state'] = C1_S3_NOTE
     return C1_S3_NOTE
 
 async def checklist_c1_s3_status_from_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -872,20 +1132,28 @@ async def checklist_c1_s3_status_from_skip(update: Update, context: ContextTypes
 async def checklist_c1_s3_note(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     query = update.callback_query
     await query.answer()
-    context.user_data['cl']['c1_s3_status'] = "yes" if query.data == "cl_yes" else "no"
+    status_val = "yes" if query.data == "cl_yes" else "no"
+    context.user_data['cl']['c1_s3_status'] = status_val
+
     template_data = get_checklist_template_data(context.user_data['cl'])
+    template_data['status'] = get_status_text_md(status_val)
+
     text = templates.CHECKLIST_C1_S3_NOTE.format(**template_data)
     await edit_main_message(context, text, get_skip_note_keyboard())
-    # (v3.1.3) Повертаємо ПРАВИЛЬНИЙ стан
+
+    # (v3.6) Зберігаємо поточний стан
+    context.user_data['current_state'] = C2_S1_STATUS
     return C2_S1_STATUS
 
-# --- Категорія 2 (Логіка v2.8) ---
+# --- Категорія 2 (Логіка v3.8 - Виправлено "Skip" та UX) ---
 
 async def _ask_c2_s1_status(context: ContextTypes.DEFAULT_TYPE) -> int:
     template_data = get_checklist_template_data(context.user_data['cl'])
     text = templates.CHECKLIST_C2_S1_STATUS.format(**template_data)
     await edit_main_message(context, text, get_checklist_status_keyboard())
-    # (v3.1.3) Повертаємо ПРАВИЛЬНИЙ стан
+
+    # (v3.6) Зберігаємо поточний стан
+    context.user_data['current_state'] = C2_S1_NOTE
     return C2_S1_NOTE
 
 async def checklist_c2_s1_status_from_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -902,18 +1170,26 @@ async def checklist_c2_s1_status_from_skip(update: Update, context: ContextTypes
 async def checklist_c2_s1_note(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     query = update.callback_query
     await query.answer()
-    context.user_data['cl']['c2_s1_status'] = "yes" if query.data == "cl_yes" else "no"
+    status_val = "yes" if query.data == "cl_yes" else "no"
+    context.user_data['cl']['c2_s1_status'] = status_val
+
     template_data = get_checklist_template_data(context.user_data['cl'])
+    template_data['status'] = get_status_text_md(status_val)
+    
     text = templates.CHECKLIST_C2_S1_NOTE.format(**template_data)
     await edit_main_message(context, text, get_skip_note_keyboard())
-    # (v3.1.3) Повертаємо ПРАВИЛЬНИЙ стан
+
+    # (v3.6) Зберігаємо поточний стан
+    context.user_data['current_state'] = C2_S2_STATUS
     return C2_S2_STATUS
 
 async def _ask_c2_s2_status(context: ContextTypes.DEFAULT_TYPE) -> int:
     template_data = get_checklist_template_data(context.user_data['cl'])
     text = templates.CHECKLIST_C2_S2_STATUS.format(**template_data)
     await edit_main_message(context, text, get_checklist_status_keyboard())
-    # (v3.1.3) Повертаємо ПРАВИЛЬНИЙ стан
+
+    # (v3.6) Зберігаємо поточний стан
+    context.user_data['current_state'] = C2_S2_NOTE
     return C2_S2_NOTE
 
 async def checklist_c2_s2_status_from_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -930,18 +1206,26 @@ async def checklist_c2_s2_status_from_skip(update: Update, context: ContextTypes
 async def checklist_c2_s2_note(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     query = update.callback_query
     await query.answer()
-    context.user_data['cl']['c2_s2_status'] = "yes" if query.data == "cl_yes" else "no"
+    status_val = "yes" if query.data == "cl_yes" else "no"
+    context.user_data['cl']['c2_s2_status'] = status_val
+
     template_data = get_checklist_template_data(context.user_data['cl'])
+    template_data['status'] = get_status_text_md(status_val)
+
     text = templates.CHECKLIST_C2_S2_NOTE.format(**template_data)
     await edit_main_message(context, text, get_skip_note_keyboard())
-    # (v3.1.3) Повертаємо ПРАВИЛЬНИЙ стан
+
+    # (v3.6) Зберігаємо поточний стан
+    context.user_data['current_state'] = C2_S3_STATUS
     return C2_S3_STATUS
 
 async def _ask_c2_s3_status(context: ContextTypes.DEFAULT_TYPE) -> int:
     template_data = get_checklist_template_data(context.user_data['cl'])
     text = templates.CHECKLIST_C2_S3_STATUS.format(**template_data)
     await edit_main_message(context, text, get_checklist_status_keyboard())
-    # (v3.1.3) Повертаємо ПРАВИЛЬНИЙ стан
+
+    # (v3.6) Зберігаємо поточний стан
+    context.user_data['current_state'] = C2_S3_NOTE
     return C2_S3_NOTE
 
 async def checklist_c2_s3_status_from_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -958,20 +1242,28 @@ async def checklist_c2_s3_status_from_skip(update: Update, context: ContextTypes
 async def checklist_c2_s3_note(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     query = update.callback_query
     await query.answer()
-    context.user_data['cl']['c2_s3_status'] = "yes" if query.data == "cl_yes" else "no"
+    status_val = "yes" if query.data == "cl_yes" else "no"
+    context.user_data['cl']['c2_s3_status'] = status_val
+    
     template_data = get_checklist_template_data(context.user_data['cl'])
+    template_data['status'] = get_status_text_md(status_val)
+
     text = templates.CHECKLIST_C2_S3_NOTE.format(**template_data)
     await edit_main_message(context, text, get_skip_note_keyboard())
-    # (v3.1.3) Повертаємо ПРАВИЛЬНИЙ стан
+
+    # (v3.6) Зберігаємо поточний стан
+    context.user_data['current_state'] = C3_S1_STATUS
     return C3_S1_STATUS
 
-# --- Категорія 3 (Логіка v2.8) ---
+# --- Категорія 3 (Логіка v3.8 - Виправлено "Skip" та UX) ---
 
 async def _ask_c3_s1_status(context: ContextTypes.DEFAULT_TYPE) -> int:
     template_data = get_checklist_template_data(context.user_data['cl'])
     text = templates.CHECKLIST_C3_S1_STATUS.format(**template_data)
     await edit_main_message(context, text, get_checklist_status_keyboard())
-    # (v3.1.3) Повертаємо ПРАВИЛЬНИЙ стан
+
+    # (v3.6) Зберігаємо поточний стан
+    context.user_data['current_state'] = C3_S1_NOTE
     return C3_S1_NOTE
 
 async def checklist_c3_s1_status_from_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -988,18 +1280,26 @@ async def checklist_c3_s1_status_from_skip(update: Update, context: ContextTypes
 async def checklist_c3_s1_note(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     query = update.callback_query
     await query.answer()
-    context.user_data['cl']['c3_s1_status'] = "yes" if query.data == "cl_yes" else "no"
+    status_val = "yes" if query.data == "cl_yes" else "no"
+    context.user_data['cl']['c3_s1_status'] = status_val
+
     template_data = get_checklist_template_data(context.user_data['cl'])
+    template_data['status'] = get_status_text_md(status_val)
+
     text = templates.CHECKLIST_C3_S1_NOTE.format(**template_data)
     await edit_main_message(context, text, get_skip_note_keyboard())
-    # (v3.1.3) Повертаємо ПРАВИЛЬНИЙ стан
+
+    # (v3.6) Зберігаємо поточний стан
+    context.user_data['current_state'] = C3_S2_STATUS
     return C3_S2_STATUS
 
 async def _ask_c3_s2_status(context: ContextTypes.DEFAULT_TYPE) -> int:
     template_data = get_checklist_template_data(context.user_data['cl'])
     text = templates.CHECKLIST_C3_S2_STATUS.format(**template_data)
     await edit_main_message(context, text, get_checklist_status_keyboard())
-    # (v3.1.3) Повертаємо ПРАВИЛЬНИЙ стан
+
+    # (v3.6) Зберігаємо поточний стан
+    context.user_data['current_state'] = C3_S2_NOTE
     return C3_S2_NOTE
 
 async def checklist_c3_s2_status_from_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -1007,7 +1307,7 @@ async def checklist_c3_s2_status_from_text(update: Update, context: ContextTypes
     await delete_user_text_reply(update)
     return await _ask_c3_s2_status(context)
 
-async def checklist_c3_s2_status_from_skip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int: # (v3.1.1) ВИПРАВЛЕНО ОДРУКІВКУ TPE -> TYPE
+async def checklist_c3_s2_status_from_skip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int: 
     query = update.callback_query
     await query.answer()
     context.user_data['cl']['c3_s1_note'] = "*Пропущено*"
@@ -1016,18 +1316,26 @@ async def checklist_c3_s2_status_from_skip(update: Update, context: ContextTypes
 async def checklist_c3_s2_note(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     query = update.callback_query
     await query.answer()
-    context.user_data['cl']['c3_s2_status'] = "yes" if query.data == "cl_yes" else "no"
+    status_val = "yes" if query.data == "cl_yes" else "no"
+    context.user_data['cl']['c3_s2_status'] = status_val
+
     template_data = get_checklist_template_data(context.user_data['cl'])
+    template_data['status'] = get_status_text_md(status_val)
+
     text = templates.CHECKLIST_C3_S2_NOTE.format(**template_data)
     await edit_main_message(context, text, get_skip_note_keyboard())
-    # (v3.1.3) Повертаємо ПРАВИЛЬНИЙ стан
+
+    # (v3.6) Зберігаємо поточний стан
+    context.user_data['current_state'] = C3_S3_STATUS
     return C3_S3_STATUS
 
 async def _ask_c3_s3_status(context: ContextTypes.DEFAULT_TYPE) -> int:
     template_data = get_checklist_template_data(context.user_data['cl'])
     text = templates.CHECKLIST_C3_S3_STATUS.format(**template_data)
     await edit_main_message(context, text, get_checklist_status_keyboard())
-    # (v3.1.3) Повертаємо ПРАВИЛЬНИЙ стан
+
+    # (v3.6) Зберігаємо поточний стан
+    context.user_data['current_state'] = C3_S3_NOTE
     return C3_S3_NOTE
 
 async def checklist_c3_s3_status_from_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -1044,14 +1352,20 @@ async def checklist_c3_s3_status_from_skip(update: Update, context: ContextTypes
 async def checklist_c3_s3_note(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     query = update.callback_query
     await query.answer()
-    context.user_data['cl']['c3_s3_status'] = "yes" if query.data == "cl_yes" else "no"
+    status_val = "yes" if query.data == "cl_yes" else "no"
+    context.user_data['cl']['c3_s3_status'] = status_val
+
     template_data = get_checklist_template_data(context.user_data['cl'])
+    template_data['status'] = get_status_text_md(status_val)
+
     text = templates.CHECKLIST_C3_S3_NOTE.format(**template_data)
     await edit_main_message(context, text, get_skip_note_keyboard())
-    # (v3.1.3) Повертаємо ПРАВИЛЬНИЙ стан
+
+    # (v3.6) Зберігаємо поточний стан
+    context.user_data['current_state'] = CHECKLIST_GENERATE
     return CHECKLIST_GENERATE
 
-# --- Генерація (Логіка v2.8) ---
+# --- Генерація (Логіка v3.6 - Виправлено "Skip") ---
 
 async def checklist_generate_from_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     context.user_data['cl']['c3_s3_note'] = update.message.text
@@ -1065,7 +1379,7 @@ async def checklist_generate_from_skip(update: Update, context: ContextTypes.DEF
     return await checklist_generate(update, context)
 
 async def checklist_generate(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """(ОНОВЛЕНО v3.1) Генерує PDF Чек-ліста та показує кнопку "Повернутись"."""
+    """(ОНОВЛЕНО v3.8) Генерує PDF Чек-ліста та показує кнопку "Повернутись"."""
     user_id = context._user_id
     logger.info(f"User {user_id}: генерація PDF Чек-ліста.")
     
@@ -1095,6 +1409,7 @@ async def checklist_generate(update: Update, context: ContextTypes.DEFAULT_TYPE)
         if note == "*Пропущено*":
             return note
         note_safe = html.escape(note)
+        # (v3.6) Замінюємо markdown-escape на html <br>
         return note_safe.replace("\n", "<br>") 
 
     table_header = "| Пункт | Статус | Ваші Нотатки (для себе) |\n| :--- | :--- | :--- |\n"
@@ -1125,7 +1440,9 @@ async def checklist_generate(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
     checklist_content = f"{cat_1_table}{cat_2_table}{cat_3_table}"
 
+    # (v3.8) КРИТИЧНИЙ ФІКС: Додаємо 'project_name'
     data_dict = {
+        'project_name': html.escape(data.get('project_name', '[Назва Проєкту]')),
         'date': date.today().strftime("%d.%m.%Y"),
         'checklist_content': checklist_content 
     }
@@ -1134,6 +1451,7 @@ async def checklist_generate(update: Update, context: ContextTypes.DEFAULT_TYPE)
     clear_user_data(context)
 
     try:
+        # (v3.8) Тепер .format() отримає 'project_name'
         filled_markdown = templates.CHECKLIST_TEMPLATE_PDF.format(**data_dict)
         
         pdf_file_path = create_pdf_from_markdown(
@@ -1161,8 +1479,8 @@ async def checklist_generate(update: Update, context: ContextTypes.DEFAULT_TYPE)
         except Exception:
             pass
         await context.bot.send_message(chat_id=chat_id, text=f"Під час генерації PDF сталася помилка: {e}")
-        # (v3.1) Все одно повертаємо в меню, навіть якщо помилка
-        await start(update, context)
+        # (v3.4) Викликаємо 'start' з фальшивим update
+        await start(_FakeUpdate(chat_id, context.bot), context)
     
     finally:
         return ConversationHandler.END
@@ -1174,22 +1492,24 @@ def main() -> None: # (v3.1.2) Повернено до СИНХРОННОЇ
     """Запускає бота."""
     application = Application.builder().token(BOT_TOKEN).build()
 
-    # (ОНОВЛЕНО v3.0) Entry points тепер реагують на CallbackQuery з меню /start
-    policy_conv_handler = ConversationHandler(
-        entry_points=[CallbackQueryHandler(start_policy, pattern="^start_policy$")],
+    # (v3.2) СТВОРЮЄМО ОДИН ЄДИНИЙ ОБРОБНИК РОЗМОВ
+    main_conv_handler = ConversationHandler(
+        entry_points=[
+            CallbackQueryHandler(start_policy, pattern="^start_policy$"),
+            CallbackQueryHandler(start_dpia, pattern="^start_dpia$"),
+            CallbackQueryHandler(start_checklist, pattern="^start_checklist$"),
+            # (НОВЕ v3.4) Вхідна точка для "Етичного Нагадування"
+            CallbackQueryHandler(start_checklist_from_upsell, pattern="^start_checklist_upsell$")
+        ],
         states={
+            # --- Стани "Політики" (10-14) ---
             POLICY_Q_CONTACT: [MessageHandler(filters.TEXT & ~filters.COMMAND, policy_q_contact)],
             POLICY_Q_DATA_COLLECTED: [MessageHandler(filters.TEXT & ~filters.COMMAND, policy_q_data_collected)],
             POLICY_Q_DATA_STORAGE: [MessageHandler(filters.TEXT & ~filters.COMMAND, policy_q_data_storage)],
             POLICY_Q_DELETE_MECHANISM: [MessageHandler(filters.TEXT & ~filters.COMMAND, policy_q_delete_mechanism)],
             POLICY_GENERATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, policy_generate)],
-        },
-        fallbacks=[CommandHandler("cancel", cancel)],
-    )
-    
-    dpia_conv_handler = ConversationHandler(
-        entry_points=[CallbackQueryHandler(start_dpia, pattern="^start_dpia$")],
-        states={
+            
+            # --- Стани "DPIA" (20-31) ---
             DPIA_Q_TEAM: [MessageHandler(filters.TEXT & ~filters.COMMAND, dpia_q_team)],
             DPIA_Q_GOAL: [MessageHandler(filters.TEXT & ~filters.COMMAND, dpia_q_goal)],
             DPIA_Q_DATA_LIST: [MessageHandler(filters.TEXT & ~filters.COMMAND, dpia_q_data_list)],
@@ -1201,14 +1521,12 @@ def main() -> None: # (v3.1.2) Повернено до СИНХРОННОЇ
             DPIA_Q_RISK: [MessageHandler(filters.TEXT & ~filters.COMMAND, dpia_q_risk)],
             DPIA_Q_MITIGATION: [MessageHandler(filters.TEXT & ~filters.COMMAND, dpia_q_mitigation)],
             DPIA_GENERATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, dpia_generate)],
-        },
-        fallbacks=[CommandHandler("cancel", cancel)],
-    )
 
-    checklist_conv_handler = ConversationHandler(
-        entry_points=[CallbackQueryHandler(start_checklist, pattern="^start_checklist$")],
-        states={
-            # (v3.1.3) Повністю перероблений state machine
+            # --- Стани "Чек-ліста" (40-58) --- (v3.8)
+            # (v3.8) НОВИЙ СТАН
+            CHECKLIST_Q_PROJECT_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, checklist_q_project_name)],
+            
+            # (v3.6) Повністю перероблений state machine
             # Cat 1
             C1_S1_NOTE: [CallbackQueryHandler(checklist_c1_s1_note, pattern="^cl_(yes|no)$")],
             C1_S2_STATUS: [
@@ -1262,14 +1580,24 @@ def main() -> None: # (v3.1.2) Повернено до СИНХРОННОЇ
                 CallbackQueryHandler(checklist_generate_from_skip, pattern="^cl_skip_note$")
             ],
         },
-        fallbacks=[CommandHandler("cancel", cancel)],
+        fallbacks=[
+            # (НОВЕ v3.4) "Блокувальник"
+            CallbackQueryHandler(
+                block_workflow_switch, 
+                pattern="^start_policy$|^start_dpia$|^start_checklist$"
+            ),
+            # (НОВЕ v3.4) Кнопка "Скасувати" з "Блокувальника"
+            CallbackQueryHandler(cancel_from_block, pattern="^cancel_from_block$"),
+            
+            # Стандартний /cancel
+            CommandHandler("cancel", cancel)
+        ],
+        # (v3.4) ВИДАЛЕНО 'allow_reentry=True'. Тепер бот "блокується".
     )
 
-    application.add_handler(policy_conv_handler)
-    application.add_handler(dpia_conv_handler)
-    application.add_handler(checklist_conv_handler)
+    application.add_handler(main_conv_handler)
     
-    # Головні команди та кнопки меню
+    # Головні команди та кнопки меню (вони поза розмовою)
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CallbackQueryHandler(start, pattern="^start_menu$")) # Кнопка "Назад в меню"
     # (v3.1) Нова кнопка "Повернутись" після генерації
@@ -1282,6 +1610,7 @@ def main() -> None: # (v3.1.2) Повернено до СИНХРОННОЇ
     application.add_handler(CallbackQueryHandler(show_help_inline, pattern="^show_help$"))
 
     # Глобальний fallback 'cancel' (ловить /cancel будь-де)
+    # (v3.2) Цей 'cancel' обробляється, лише якщо ми НЕ в 'main_conv_handler'
     application.add_handler(CommandHandler("cancel", cancel)) 
 
     # (v3.1.2) Ми не можемо отримати username до запуску run_polling(),
