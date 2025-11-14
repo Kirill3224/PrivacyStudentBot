@@ -1,6 +1,6 @@
 # 9. Рефлексія (Reflection)
 
-**Автор:** Кирило [Прізвище], Team Lead / Documentation Architect
+**Автор:** Ревякін Кирило, Team Lead / Documentation Architect
 
 Цей документ — це рефлексія нашої команди (і моя особиста) на процес роботи над "Privacy Kit".
 
